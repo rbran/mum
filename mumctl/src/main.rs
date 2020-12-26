@@ -206,12 +206,12 @@ fn main() {
         let response = stdin.lock().lines().next();
         match response.map(|e| e.map(|e| &e == "Y")) {
             Some(Ok(true)) => {
-                config.write_default_cfg(true).unwrap();
+                config.write_default_cfg(true).unwrap(); //TODO handle panic
             }
             _ => {}
         }
     } else {
-        config.write_default_cfg(false).unwrap();
+        config.write_default_cfg(false).unwrap(); //TODO handle panic
     }
 }
 
@@ -293,13 +293,13 @@ fn process_matches(matches: ArgMatches, config: &mut Config, app: &mut App) -> R
         match name {
             "audio.input_volume" => {
                 if let Ok(volume) = value.parse() {
-                    send_command(Command::InputVolumeSet(volume))?.unwrap();
+                    send_command(Command::InputVolumeSet(volume))?.unwrap(); //TODO error_if_err
                     config.audio.input_volume = Some(volume);
                 }
             }
             "audio.output_volume" => {
                 if let Ok(volume) = value.parse() {
-                    send_command(Command::OutputVolumeSet(volume))?.unwrap();
+                    send_command(Command::OutputVolumeSet(volume))?.unwrap(); //TODO error_if_err
                     config.audio.output_volume = Some(volume);
                 }
             }
@@ -308,7 +308,7 @@ fn process_matches(matches: ArgMatches, config: &mut Config, app: &mut App) -> R
             }
         }
     } else if matches.subcommand_matches("config-reload").is_some() {
-        send_command(Command::ConfigReload)?.unwrap();
+        send_command(Command::ConfigReload)?.unwrap(); //TODO error_if_err
     } else if let Some(matches) = matches.subcommand_matches("completions") {
         app.gen_completions_to(
             "mumctl",
@@ -621,13 +621,13 @@ fn send_command(command: Command) -> Result<mumlib::error::Result<Option<Command
     let (tx_client, rx_client) =
         ipc::channel::<mumlib::error::Result<Option<CommandResponse>>>().unwrap();
 
-    let server_name = fs::read_to_string(mumlib::SOCKET_PATH).unwrap(); //TODO don't panic
+    let server_name = fs::read_to_string(mumlib::SOCKET_PATH).unwrap(); //TODO handle panic
 
     let tx0 = IpcSender::connect(server_name).map_err(|_| Error::ConnectionError)?;
 
-    tx0.send((command, tx_client)).unwrap();
+    tx0.send((command, tx_client)).unwrap(); //TODO handle panic
 
-    Ok(rx_client.recv().unwrap())
+    Ok(rx_client.recv().unwrap()) //TODO handle panic
 }
 
 fn print_channel(channel: &Channel, depth: usize) {

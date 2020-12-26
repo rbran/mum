@@ -86,7 +86,7 @@ async fn main() {
         }),
         network::udp::handle_pings(ping_request_receiver),
     );
-    e.unwrap();
+    e.unwrap(); //TODO handle panic. is this even needed?
 }
 
 fn receive_oneshot_commands(
@@ -104,7 +104,7 @@ fn receive_oneshot_commands(
             )>,
             String,
         ) = IpcOneShotServer::new().unwrap();
-        fs::write(mumlib::SOCKET_PATH, &server_name).unwrap();
+        fs::write(mumlib::SOCKET_PATH, &server_name).unwrap(); //TODO handle panic
         debug!("Listening to {}", server_name);
 
         // receive command and response channel

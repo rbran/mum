@@ -123,7 +123,7 @@ async fn authenticate(sink: &mut TcpSender, username: String) {
     let mut msg = msgs::Authenticate::new();
     msg.set_username(username);
     msg.set_opus(true);
-    sink.send(msg.into()).await.unwrap();
+    sink.send(msg.into()).await.unwrap(); //TODO except
 }
 
 async fn send_pings(
@@ -141,7 +141,7 @@ async fn send_pings(
         |_| async {
             trace!("Sending ping");
             let msg = msgs::Ping::new();
-            packet_sender.borrow_mut().send(msg.into()).unwrap();
+            packet_sender.borrow_mut().send(msg.into()).unwrap(); //TODO except
         },
         || async {},
         phase_watcher,
@@ -161,13 +161,13 @@ async fn send_packets(
     run_until_disconnection(
         || async { packet_receiver.borrow_mut().recv().await },
         |packet| async {
-            sink.borrow_mut().send(packet).await.unwrap();
+            sink.borrow_mut().send(packet).await.unwrap(); //TODO except
         },
         || async {
             //clears queue of remaining packets
             while packet_receiver.borrow_mut().try_recv().is_ok() {}
 
-            sink.borrow_mut().close().await.unwrap();
+            sink.borrow_mut().close().await.unwrap(); //TODO except
         },
         phase_watcher,
     )
@@ -190,7 +190,7 @@ async fn listen(
     run_until_disconnection(
         || async { stream.borrow_mut().next().await },
         |packet| async {
-            match packet.unwrap() {
+            match packet.unwrap() { //TODO handle panic
                 ControlPacket::TextMessage(msg) => {
                     info!(
                         "Got message from user with session ID {}: {}",
