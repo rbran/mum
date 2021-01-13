@@ -37,6 +37,9 @@ impl Channel {
             links: Vec::new(),
         }
     }
+
+    /// Create an iterator over this channel and its children in a pre-order
+    /// traversal.
     pub fn iter(&self) -> Iter<'_> {
         Iter {
             me: Some(&self),
@@ -49,6 +52,8 @@ impl Channel {
         }
     }
 
+    /// Create an iterator over this channel and its childrens connected users
+    /// in a pre-order traversal.
     pub fn users_iter(&self) -> UsersIter<'_> {
         UsersIter {
             channels: self.children.iter().map(|e| e.users_iter()).collect(),
@@ -67,6 +72,7 @@ impl Channel {
     }
 }
 
+/// An iterator over channels. Created by [Channel::iter].
 pub struct Iter<'a> {
     me: Option<&'a Channel>,
     channel: Option<usize>,
@@ -97,6 +103,7 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
+/// An iterator over users. Created by [Channel::users_iter].
 pub struct UsersIter<'a> {
     channel: Option<usize>,
     channels: Vec<UsersIter<'a>>,

@@ -6,7 +6,10 @@ pub mod state;
 use colored::*;
 use log::*;
 
+/// The default temporary file to save the current listened to socket file in.
 pub const SOCKET_PATH: &str = "/var/tmp/mumd";
+
+/// The default mumble port.
 pub const DEFAULT_PORT: u16 = 64738;
 
 pub fn setup_logger<T: Into<fern::Output>>(target: T, color: bool) {

@@ -7,12 +7,15 @@ use std::path::Path;
 use toml::value::Array;
 use toml::Value;
 
+/// A serializable version of [Config].
 #[derive(Debug, Deserialize, Serialize)]
 struct TOMLConfig {
     audio: Option<AudioConfig>,
     servers: Option<Array>,
 }
 
+/// Our representation of the mumdrc config file.
+// Deserialized via [TOMLConfig].
 #[derive(Clone, Debug, Default)]
 pub struct Config {
     pub audio: AudioConfig,
@@ -20,6 +23,16 @@ pub struct Config {
 }
 
 impl Config {
+    /// Write this config to the first found default config file location.
+    ///
+    /// The file is looked for in the following places in the following order:
+    ///
+    /// 1. $XDG_CONFIG_HOME/mumdrc
+    /// 2. $HOME/.config/mumdrc
+    /// 3. /etc/mumdrc
+    ///
+    /// Optionally also create the first path that can be found if it's not
+    /// already a config file.
     pub fn write_default_cfg(&self, create: bool) -> Result<(), std::io::Error> {
         let path = if create {
             get_creatable_cfg_path()
@@ -80,6 +93,11 @@ impl ServerConfig {
     }
 }
 
+/// The file is looked for in the following places in the following order:
+///
+/// 1. $XDG_CONFIG_HOME/mumdrc
+/// 2. $HOME/.config/mumdrc
+/// 3. /etc/mumdrc
 pub fn get_cfg_path() -> String {
     if let Ok(var) = std::env::var("XDG_CONFIG_HOME") {
         let path = format!("{}/mumdrc", var);
@@ -96,6 +114,11 @@ pub fn get_cfg_path() -> String {
     "/etc/mumdrc".to_string()
 }
 
+/// The file is looked for in the following places in the following order:
+///
+/// 1. $XDG_CONFIG_HOME/mumdrc
+/// 2. $HOME/.config/mumdrc
+/// 3. /etc/mumdrc
 pub fn get_creatable_cfg_path() -> String {
     if let Ok(var) = std::env::var("XDG_CONFIG_HOME") {
         let path = format!("{}/mumdrc", var);
@@ -112,6 +135,11 @@ pub fn get_creatable_cfg_path() -> String {
     "/etc/mumdrc".to_string()
 }
 
+/// The file is looked for in the following places in the following order:
+///
+/// 1. $XDG_CONFIG_HOME/mumdrc
+/// 2. $HOME/.config/mumdrc
+/// 3. /etc/mumdrc
 pub fn cfg_exists() -> bool {
     if let Ok(var) = std::env::var("XDG_CONFIG_HOME") {
         let path = format!("{}/mumdrc", var);
@@ -169,6 +197,15 @@ impl From<Config> for TOMLConfig {
     }
 }
 
+
+
+/// Read the config from file.
+///
+/// The file is looked for in the following places in the following order:
+///
+/// 1. $XDG_CONFIG_HOME/mumdrc
+/// 2. $HOME/.config/mumdrc
+/// 3. /etc/mumdrc
 pub fn read_default_cfg() -> Config {
     Config::try_from(
         toml::from_str::<TOMLConfig>(&match fs::read_to_string(get_cfg_path()) {
