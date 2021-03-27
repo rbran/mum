@@ -11,7 +11,7 @@ repository = "https://github.com/sornas/mum"
 license = "MIT"
 
 [features]
-default = ["notifications"]
+#default = ["notifications"]
 
 notifications = ["libnotify"]
 
