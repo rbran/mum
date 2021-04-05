@@ -37,7 +37,7 @@ pub async fn handle(
     config: Arc<Config>,
     tx_crypt: TxCrypt,
     stream_type: StreamType,
-    rx_command: RxCommandPacket,
+    mut rx_command: RxCommandPacket,
     tx_command: TxCommandPacket,
     tx_audio: TxAudioDecoder,
 ) -> crate::Result<()> {
@@ -46,15 +46,25 @@ pub async fn handle(
     // this don't wait authentication sucess, just send the request
     authenticate(&config, &mut sink).await?;
 
+    let mut sender = tokio::spawn( async move {
+        sender(&mut rx_command, &mut sink).await
+    });
+    let mut receiver = tokio::spawn( async move {
+        receiver(tx_crypt, &stream_type, tx_audio.clone(), &mut stream).await
+    });
+    let mut ping = tokio::spawn( async move {
+        ping(tx_command.clone()).await
+    });
+
     select!(
-        ret = sender(rx_command, &mut sink) => ret,
-        ret = receiver(tx_crypt, &stream_type, tx_audio.clone(), &mut stream) => ret,
-        ret = ping(tx_command.clone()) => ret,
+        ret = &mut sender => ret?,
+        ret = &mut receiver => ret?,
+        ret = &mut ping => ret?,
     )
 }
 
 pub async fn sender(
-    mut rx_tcp_sender: RxCommandPacket,
+    rx_tcp_sender: &mut RxCommandPacket,
     sink: &mut TcpSender,
 ) -> crate::Result<()> {
     loop {

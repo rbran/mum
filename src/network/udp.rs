@@ -1,11 +1,10 @@
-use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use log::*;
-use mumble_protocol::crypt::ClientCryptState;
+use mumble_protocol::crypt::CryptState;
 use mumble_protocol::voice::VoicePacket;
-use mumble_protocol::Serverbound;
+use mumble_protocol::{Serverbound, Clientbound};
 use std::convert::TryInto;
-use std::net::{Ipv6Addr, SocketAddr};
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::select;
@@ -28,11 +27,7 @@ type PingRequest = u64;
 type TxPingRequest = watch::Sender<PingRequest>;
 type RxPingRequest = watch::Receiver<PingRequest>;
 
-type UdpSender = SplitSink<
-    UdpFramed<ClientCryptState>,
-    (VoicePacket<Serverbound>, SocketAddr),
->;
-type UdpReceiver = SplitStream<UdpFramed<ClientCryptState>>;
+type UdpEncSocket = Arc<tokio::sync::Mutex<UdpFramed<CryptState<Serverbound, Clientbound>>>>;
 
 pub async fn handle(
     config: Arc<Config>,
@@ -44,49 +39,78 @@ pub async fn handle(
 ) -> crate::Result<()> {
     //wait for the encryption before start the loop
     rx_crypt.changed().await?;
-    loop {
-        let socket = connect(&config).await?;
-        let (sink, stream) = {
-            let crypt = rx_crypt
-                .borrow()
-                .clone()
-                .ok_or_else(|| {
-                    Box::new(Error::new(
-                        ErrorKind::Interrupted,
-                        "TCP receiver unable to receive from socket",
-                    ))
-                })?
-                .try_into()?;
-            let framed = UdpFramed::new(socket, crypt);
-            framed.split()
-        };
-        let (tx_last_ping, rx_last_ping) = watch::channel(0);
+    let socket = connect(&config).await?;
+    let udp_crypt = rx_crypt
+        .borrow()
+        .clone()
+        .ok_or_else(|| {
+            Box::new(Error::new(
+                ErrorKind::Interrupted,
+                "TCP receiver unable to receive from socket",
+            ))
+        })?
+        .try_into()?;
+    let socket = Arc::new(tokio::sync::Mutex::new(UdpFramed::new(socket, udp_crypt)));
+    let (tx_last_ping, rx_last_ping) = watch::channel(0);
 
-        select!(
-            ret = sender(Arc::clone(&config), &mut rx_sender_packet, sink) => ret,
-            ret = receiver(stream, tx_audio_decoder.clone(), tx_last_ping) => ret,
-            ret = ping(Arc::clone(&stream_type), tx_sender_packet.clone(), rx_last_ping) => ret,
-            ret = crypt(rx_crypt.clone()) => ret,
-        )?;
-        debug!("UDP restarting");
+    let config_clone = Arc::clone(&config);
+    let socket_clone = Arc::clone(&socket);
+    let mut sender = tokio::spawn(async move {
+        sender(config_clone, &mut rx_sender_packet, socket_clone).await
+    });
+    let tx_audio_decoder_clone = tx_audio_decoder.clone();
+    let socket_clone = Arc::clone(&socket);
+    let mut receiver = tokio::spawn(async move {
+        receiver(socket_clone, tx_audio_decoder_clone, tx_last_ping).await
+    });
+    let stream_type_clone = Arc::clone(&stream_type);
+    let tx_sender_packet_clone = tx_sender_packet.clone();
+    let mut ping = tokio::spawn(async move {
+        ping(stream_type_clone, tx_sender_packet_clone, rx_last_ping).await
+    });
+    let rx_crypt_clone = rx_crypt.clone();
+    let socket_clone = Arc::clone(&socket);
+    let mut crypt = tokio::spawn(async move {
+        crypt(rx_crypt_clone, socket_clone).await
+    });
+
+    select!(
+        ret = &mut sender => ret?,
+        ret = &mut receiver => ret?,
+        ret = &mut ping => ret?,
+        ret = &mut crypt => ret?,
+    )
+    //TODO don't open a new connection, just update the codec on
+    //UdpFramed, currently the connection is reseted
+}
+
+async fn crypt(mut rx_crypt: RxCrypt, socket: UdpEncSocket) -> crate::Result<()> {
+    loop {
+        rx_crypt.changed().await.or_else(|_e| -> crate::Result<()> {
+            Err(Box::new(Error::new(
+                ErrorKind::Interrupted,
+                "UDP Unable to receive new crypto",
+            )))
+        })?;
+        let udp_crypt = rx_crypt
+            .borrow()
+            .clone()
+            .ok_or_else(|| {
+                Box::new(Error::new(
+                    ErrorKind::Interrupted,
+                    "TCP receiver unable to receive from socket",
+                ))
+            })?
+        .try_into()?;
+        debug!("UDP key changed");
+        *socket.lock().await.codec_mut() = udp_crypt;
     }
 }
 
-pub async fn crypt(mut rx_crypt: RxCrypt) -> crate::Result<()> {
-    //TODO don't open a new connection, just update the codec on
-    //UdpFramed, currently the connection is reseted
-    rx_crypt.changed().await.or_else(|_e| -> crate::Result<()> {
-        Err(Box::new(Error::new(
-            ErrorKind::Interrupted,
-            "UDP Unable to receive new crypto",
-        )))
-    })
-}
-
-pub async fn sender(
+async fn sender(
     config: Arc<Config>,
     rx_packet: &mut RxSenderPacket,
-    mut sink: UdpSender,
+    sink: UdpEncSocket,
 ) -> crate::Result<()> {
     loop {
         let packet = rx_packet.recv().await.ok_or_else(|| {
@@ -95,21 +119,23 @@ pub async fn sender(
                 "UDP sender, Unable to receive from channel",
             ))
         })?;
+        let mut sink = sink.lock().await;
         sink.send((packet, config.addr)).await?;
     }
 }
 
-pub async fn receiver(
-    mut stream: UdpReceiver,
+async fn receiver(
+    stream: UdpEncSocket,
     tx_audio_decoder: TxAudioDecoder,
     tx_last_ping: TxPingRequest,
 ) -> crate::Result<()> {
     // initiate the crypt state
     loop {
+        let mut stream = stream.lock().await;
         let packet = stream.next().await.ok_or_else(|| {
             Box::new(Error::new(
                 ErrorKind::Interrupted,
-                "UDP sender, Unable to receive from channel",
+                "UDP receiver, Unable to receive from channel",
             ))
         })?;
         let (packet, _src_addr) = match packet {
@@ -143,7 +169,7 @@ pub async fn receiver(
     }
 }
 
-pub async fn ping(
+async fn ping(
     stream_type: StreamType,
     tx_packet: TxSenderPacket,
     mut rx_last_ping: RxPingRequest,
@@ -190,7 +216,7 @@ pub async fn ping(
     }
 }
 
-pub async fn connect(_: &Config) -> crate::Result<UdpSocket> {
+async fn connect(_: &Config) -> crate::Result<UdpSocket> {
     // Bind UDP socket
     let udp_socket = UdpSocket::bind((Ipv6Addr::from(0u128), 0u16)).await?;
     debug!("UDP connected");
